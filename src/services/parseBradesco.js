@@ -12,97 +12,85 @@ export function parseBradesco(binary) {
 
   const dateReg = /^\d{2}\/\d{2}$/
   const valReg  = /^-?\d{1,4},\d{2}$/
-  const SKIP = new Set([
-    'Data','Hist','rico','Valor (US$)','Valor(R$)',
-    'SALDO ANTERIOR','PAGTO. POR DEB EM C/C'
-  ])
+  const SKIP = new Set(['Data','Hist','rico','Valor (US$)','Valor(R$)','SALDO ANTERIOR','PAGTO. POR DEB EM C/C'])
+  const STOP = ['Total para ALEXANDRE', 'Total da fatura']
+  const IGNORE_DESC = ['Total para', 'Resumo', 'Saldo', 'Pagamento', 'Despesas', 'Cotacao', 'Taxa']
 
-  const results = []
   const ano = new Date().getFullYear()
+  const results = []
 
-  // Encontra seções de cada titular até "Total para"
+  // Encontra seções de cada titular
   const sections = []
   let curSection = null
   for (let i = 0; i < strings.length; i++) {
     const s = strings[i]
-    const hm = s.match(/([A-Z ]+STAVOLA[A-Z ]*) - (\d{4})/)
+    const hm = s.match(/ALEXANDRE M STAVOLA - (\d{4})/)
     if (hm) {
-      if (curSection && !curSection.closed) curSection.end = i
-      curSection = { holder: hm[2], start: i + 1, end: strings.length, closed: false }
+      if (curSection && curSection.end === strings.length) curSection.end = i
+      curSection = { holder: hm[1], start: i + 1, end: strings.length }
       sections.push(curSection)
     }
-    if (/^Total para /.test(s) && curSection && !curSection.closed) {
+    if (STOP.some(sw => s.startsWith(sw)) && curSection && curSection.end === strings.length) {
       curSection.end = i
-      curSection.closed = true
     }
   }
 
   for (const section of sections) {
     const items = strings.slice(section.start, section.end)
-
-    // Varre item por item procurando datas
-    // REGRA: só processa linhas que têm data DD/MM
-    // Após uma data, o próximo texto não-numérico é a descrição
-    // O próximo número após a descrição é o valor
     let i = 0
+
     while (i < items.length) {
       const s = items[i]
 
-      // Encontrou uma data válida DD/MM
-      if (dateReg.test(s) && !SKIP.has(s)) {
-        const [d, m] = s.split('/')
-        const dataISO = `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
+      // Só processa se for uma data válida DD/MM
+      if (!dateReg.test(s)) { i++; continue }
 
-        // Coleta desc e valor nos próximos itens até a próxima data
-        let desc = null
-        let val = null
-        let j = i + 1
+      const [d, m] = s.split('/')
+      const dataISO = `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
 
-        while (j < items.length) {
-          const n = items[j]
+      let desc = null
+      let j = i + 1
 
-          // Próxima data = para de coletar para essa data
-          if (dateReg.test(n)) break
-          // Linha de total = para tudo
-          if (/^Total para/.test(n)) break
+      while (j < items.length) {
+        const n = items[j]
 
-          if (SKIP.has(n)) { j++; continue }
+        // Para na próxima data
+        if (dateReg.test(n)) break
+        // Para em linha de total/resumo
+        if (STOP.some(sw => n.startsWith(sw))) { i = items.length; break }
 
-          // É um valor numérico
-          if (valReg.test(n)) {
-            if (desc && val === null) {
-              // Primeiro valor após descrição = valor da transação
-              val = parseFloat(n.replace(',', '.'))
-              // Salva e reseta para pegar próximas descrições do mesmo dia
-              const isEstorno = val < 0
-              results.push({
-                id: `brad_${results.length}`,
-                banco: 'bradesco',
-                data: dataISO,
-                descricao: desc,
-                categoria: categorizar(desc),
-                tipo: isEstorno ? 'Estorno' : 'Compra',
-                valor: isEstorno ? Math.abs(val) : -val,
-                titular: `Cartao ${section.holder}`,
-              })
-              desc = null
-              val = null
-            }
-            // Valor sem descrição antes = IOF/taxa = ignora
-          } else if (n.length > 3 && !/^\d+$/.test(n)) {
-            // É uma descrição
-            desc = n
-            val = null
+        if (SKIP.has(n)) { j++; continue }
+
+        if (valReg.test(n)) {
+          // Só registra se tem descrição antes
+          if (desc !== null) {
+            const val = parseFloat(n.replace(',', '.'))
+            const isEstorno = val < 0
+            results.push({
+              id: `brad_${results.length}`,
+              banco: 'bradesco',
+              data: dataISO,
+              descricao: desc,
+              categoria: categorizar(desc),
+              tipo: isEstorno ? 'Estorno' : 'Compra',
+              valor: isEstorno ? Math.abs(val) : -val,
+              titular: `Cartao ${section.holder}`,
+            })
+            desc = null
           }
-
-          j++
+          // Valor sem descrição = IOF/taxa = ignora
+        } else if (
+          n.length > 3 &&
+          !/^\d+$/.test(n) &&
+          !IGNORE_DESC.some(w => n.startsWith(w))
+        ) {
+          desc = n
         }
 
-        i = j
-        continue
+        j++
       }
 
-      i++
+      i = j
     }
   }
 
