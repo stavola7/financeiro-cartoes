@@ -6,69 +6,82 @@ export function parseBradesco(binary) {
   for (let i = 0; i < binary.length; i++) {
     const c = binary.charCodeAt(i)
     if (c >= 32 && c <= 126) cur += binary[i]
-    else { if (cur.length > 3) strings.push(binary.slice ? cur.trim() : cur.trim()); cur = '' }
+    else { if (cur.length > 3) strings.push(cur.trim()); cur = '' }
   }
   if (cur.length > 3) strings.push(cur.trim())
 
   const dateReg = /^\d{2}\/\d{2}$/
+  const valReg = /^-?\d{1,4},\d{2}$/
+  const skipWords = ['SALDO ANTERIOR','PAGTO. POR DEB EM C/C','Total para','Total da','Data','Hist','rico','Valor','BUS SERVICOS']
+
   const results = []
   let holder = ''
   const ano = new Date().getFullYear()
 
-  let i = 0
-  while (i < strings.length) {
+  // Find start/end of each holder section
+  let sections = []
+  let currentSection = null
+
+  for (let i = 0; i < strings.length; i++) {
     const s = strings[i]
+    const hm = s.match(/([A-Z ]+STAVOLA[A-Z ]*) - (\d{4})/)
+    if (hm) {
+      if (currentSection) currentSection.end = i
+      currentSection = { holder: hm[2], start: i + 1, end: strings.length }
+      sections.push(currentSection)
+    }
+    if (/Total da fatura/.test(s) && currentSection) {
+      currentSection.end = i
+    }
+  }
 
-    const hm = s.match(/ALEXANDRE M STAVOLA - (\d{4})/)
-    if (hm) { holder = hm[1]; i++; continue }
+  for (const section of sections) {
+    const items = strings.slice(section.start, section.end)
+    let currentDate = ''
+    let pendingDescs = []
 
-    if (dateReg.test(s) && holder) {
-      const dateStr = s
-      const items = []
-      let j = i + 1
-      while (j < strings.length) {
-        const n = strings[j]
-        if (dateReg.test(n) || /Total para/.test(n)) break
-        items.push(n)
-        j++
+    for (let i = 0; i < items.length; i++) {
+      const s = items[i]
+
+      // Skip header/summary lines
+      if (skipWords.some(w => s.startsWith(w))) continue
+      if (/ALEXANDRE M STAVOLA/.test(s)) continue
+
+      if (dateReg.test(s)) {
+        currentDate = s
+        pendingDescs = []
+        continue
       }
 
-      let currentDesc = ''
-      for (let k = 0; k < items.length; k++) {
-        const n = items[k]
-        if (/^-?\d{1,3},\d{2}$/.test(n)) {
-          const val = parseFloat(n.replace(',', '.'))
-          if (currentDesc && val > 0) {
-            const [d, m] = dateStr.split('/')
-            results.push({
-              id: 'brad_' + results.length,
-              banco: 'bradesco',
-              data: `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`,
-              descricao: currentDesc,
-              categoria: categorizar(currentDesc),
-              tipo: 'Compra',
-              valor: -val,
-              titular: 'Cartao ' + holder,
-            })
-            currentDesc = ''
-          }
-        } else if (
-          n.length > 2 &&
-          !/^Total/.test(n) &&
-          !/^Valor/.test(n) &&
-          !/^Data/.test(n) &&
-          !/^PAGTO/.test(n) &&
-          !/^SALDO/.test(n) &&
-          !/^\d+$/.test(n) &&
-          n !== 'lar utilizada:'
-        ) {
-          currentDesc = n
+      if (!currentDate) continue
+
+      const isDesc = s.length > 3 && !valReg.test(s) && !/^\d+$/.test(s)
+      const isVal = valReg.test(s)
+
+      if (isDesc) {
+        pendingDescs.push(s)
+      } else if (isVal) {
+        const val = parseFloat(s.replace(',', '.'))
+        if (val > 0 && pendingDescs.length > 0) {
+          // Use the last pending description
+          const desc = pendingDescs[pendingDescs.length - 1]
+          pendingDescs = []
+          const [d, m] = currentDate.split('/')
+          results.push({
+            id: 'brad_' + results.length,
+            banco: 'bradesco',
+            data: `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`,
+            descricao: desc,
+            categoria: categorizar(desc),
+            tipo: 'Compra',
+            valor: -val,
+            titular: 'Cartao ' + section.holder,
+          })
+        } else if (val > 0 && pendingDescs.length === 0) {
+          // value with no desc = fee, skip
         }
       }
-      i = j
-      continue
     }
-    i++
   }
 
   return results
