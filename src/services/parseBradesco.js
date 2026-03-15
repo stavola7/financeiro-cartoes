@@ -1,6 +1,7 @@
 import { categorizar } from '../utils/categorizar'
 
 export function parseBradesco(binary) {
+  // Extrai strings legíveis do binário XLS
   const strings = []
   let cur = ''
   for (let i = 0; i < binary.length; i++) {
@@ -11,76 +12,91 @@ export function parseBradesco(binary) {
   if (cur.length > 3) strings.push(cur.trim())
 
   const dateReg = /^\d{2}\/\d{2}$/
-  const valReg = /^-?\d{1,4},\d{2}$/
-  const skipWords = ['SALDO ANTERIOR','PAGTO. POR DEB EM C/C','Total para','Total da','Data','Hist','rico','Valor','BUS SERVICOS']
+  const valReg  = /^-?\d{1,4},\d{2}$/
+  const SKIP = new Set(['Data','Hist','rico','Valor (US$)','Valor(R$)','SALDO ANTERIOR','PAGTO. POR DEB EM C/C'])
 
   const results = []
-  let holder = ''
   const ano = new Date().getFullYear()
 
-  // Find start/end of each holder section
-  let sections = []
-  let currentSection = null
-
+  // Encontra seções de cada titular: do nome até "Total para ALEXANDRE"
+  const sections = []
+  let cur_section = null
   for (let i = 0; i < strings.length; i++) {
     const s = strings[i]
     const hm = s.match(/([A-Z ]+STAVOLA[A-Z ]*) - (\d{4})/)
     if (hm) {
-      if (currentSection) currentSection.end = i
-      currentSection = { holder: hm[2], start: i + 1, end: strings.length }
-      sections.push(currentSection)
+      if (cur_section) cur_section.end = i
+      cur_section = { holder: hm[2], start: i + 1, end: strings.length }
+      sections.push(cur_section)
     }
-    if (/Total da fatura/.test(s) && currentSection) {
-      currentSection.end = i
+    if (/^Total para /.test(s) && cur_section && !cur_section.closed) {
+      cur_section.end = i
+      cur_section.closed = true
     }
   }
 
   for (const section of sections) {
-    const items = strings.slice(section.start, section.end)
-    let currentDate = ''
-    let pendingDescs = []
+    const items = strings.slice(section.start, section.end).filter(s => !SKIP.has(s))
 
-    for (let i = 0; i < items.length; i++) {
-      const s = items[i]
+    // Itens antes da primeira data pertencem à primeira data da seção
+    let firstDateIdx = items.findIndex(s => dateReg.test(s))
+    const preItems = firstDateIdx > 0 ? items.slice(0, firstDateIdx) : []
 
-      // Skip header/summary lines
-      if (skipWords.some(w => s.startsWith(w))) continue
-      if (/ALEXANDRE M STAVOLA/.test(s)) continue
-
+    // Divide em blocos por data
+    const blocks = []
+    let block = null
+    for (const s of items) {
       if (dateReg.test(s)) {
-        currentDate = s
-        pendingDescs = []
-        continue
+        block = { date: s, items: [] }
+        blocks.push(block)
+      } else if (block) {
+        block.items.push(s)
+      }
+    }
+
+    // Adiciona itens pré-data ao primeiro bloco
+    if (blocks.length > 0 && preItems.length > 0) {
+      blocks[0].items = [...preItems, ...blocks[0].items]
+    }
+
+    for (const blk of blocks) {
+      const [d, m] = blk.date.split('/')
+      const dataISO = `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
+
+      // Percorre itens do bloco pareando desc → valor
+      let pendingDesc = null
+      let pendingVals = []
+
+      const flush = () => {
+        if (!pendingDesc || pendingVals.length === 0) { pendingDesc = null; pendingVals = []; return }
+        const pos = pendingVals.filter(v => v > 0)
+        if (pos.length === 0) { pendingDesc = null; pendingVals = []; return }
+        // Pega o primeiro valor positivo como valor principal da transação
+        const val = pos[0]
+        results.push({
+          id: `brad_${results.length}`,
+          banco: 'bradesco',
+          data: dataISO,
+          descricao: pendingDesc,
+          categoria: categorizar(pendingDesc),
+          tipo: 'Compra',
+          valor: -val,
+          titular: `Cartao ${section.holder}`,
+        })
+        pendingDesc = null
+        pendingVals = []
       }
 
-      if (!currentDate) continue
-
-      const isDesc = s.length > 3 && !valReg.test(s) && !/^\d+$/.test(s)
-      const isVal = valReg.test(s)
-
-      if (isDesc) {
-        pendingDescs.push(s)
-      } else if (isVal) {
-        const val = parseFloat(s.replace(',', '.'))
-        if (val > 0 && pendingDescs.length > 0) {
-          // Use the last pending description
-          const desc = pendingDescs[pendingDescs.length - 1]
-          pendingDescs = []
-          const [d, m] = currentDate.split('/')
-          results.push({
-            id: 'brad_' + results.length,
-            banco: 'bradesco',
-            data: `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`,
-            descricao: desc,
-            categoria: categorizar(desc),
-            tipo: 'Compra',
-            valor: -val,
-            titular: 'Cartao ' + section.holder,
-          })
-        } else if (val > 0 && pendingDescs.length === 0) {
-          // value with no desc = fee, skip
+      for (const s of blk.items) {
+        if (valReg.test(s)) {
+          const v = parseFloat(s.replace(',', '.'))
+          if (pendingDesc) pendingVals.push(v)
+        } else if (s.length > 3 && !/^\d+$/.test(s)) {
+          flush()
+          pendingDesc = s
         }
       }
+      flush()
     }
   }
 
