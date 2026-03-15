@@ -6,58 +6,69 @@ export function parseBradesco(binary) {
   for (let i = 0; i < binary.length; i++) {
     const c = binary.charCodeAt(i)
     if (c >= 32 && c <= 126) cur += binary[i]
-    else { if (cur.length > 3) strings.push(cur.trim()); cur = '' }
+    else { if (cur.length > 3) strings.push(binary.slice ? cur.trim() : cur.trim()); cur = '' }
   }
   if (cur.length > 3) strings.push(cur.trim())
 
   const dateReg = /^\d{2}\/\d{2}$/
-  const amountReg = /^\d{1,3}(,\d{2})?$/
   const results = []
   let holder = ''
-  let ano = new Date().getFullYear()
+  const ano = new Date().getFullYear()
 
-  for (let i = 0; i < strings.length; i++) {
+  let i = 0
+  while (i < strings.length) {
     const s = strings[i]
 
     const hm = s.match(/ALEXANDRE M STAVOLA - (\d{4})/)
-    if (hm) { holder = hm[1]; continue }
+    if (hm) { holder = hm[1]; i++; continue }
 
     if (dateReg.test(s) && holder) {
-      let desc = ''
-      let val = 0
-
-      for (let j = i + 1; j < Math.min(i + 10, strings.length); j++) {
+      const dateStr = s
+      const items = []
+      let j = i + 1
+      while (j < strings.length) {
         const n = strings[j]
-        if (dateReg.test(n)) break
-        if (/^\d{1,3},\d{2}$/.test(n)) {
-          val = parseFloat(n.replace(',', '.')) || 0
+        if (dateReg.test(n) || /Total para/.test(n)) break
+        items.push(n)
+        j++
+      }
+
+      let currentDesc = ''
+      for (let k = 0; k < items.length; k++) {
+        const n = items[k]
+        if (/^-?\d{1,3},\d{2}$/.test(n)) {
+          const val = parseFloat(n.replace(',', '.'))
+          if (currentDesc && val > 0) {
+            const [d, m] = dateStr.split('/')
+            results.push({
+              id: 'brad_' + results.length,
+              banco: 'bradesco',
+              data: `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`,
+              descricao: currentDesc,
+              categoria: categorizar(currentDesc),
+              tipo: 'Compra',
+              valor: -val,
+              titular: 'Cartao ' + holder,
+            })
+            currentDesc = ''
+          }
         } else if (
           n.length > 2 &&
-          !n.match(/^Total/) &&
-          !n.match(/^Valor/) &&
-          !n.match(/^Data/) &&
-          n !== 'SALDO ANTERIOR' &&
-          !n.match(/^\d+$/)
+          !/^Total/.test(n) &&
+          !/^Valor/.test(n) &&
+          !/^Data/.test(n) &&
+          !/^PAGTO/.test(n) &&
+          !/^SALDO/.test(n) &&
+          !/^\d+$/.test(n) &&
+          n !== 'lar utilizada:'
         ) {
-          if (!desc) desc = n
+          currentDesc = n
         }
       }
-
-      if (desc && val > 0) {
-        const [d, m] = s.split('/')
-        const dataISO = `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
-        results.push({
-          id: 'brad_' + results.length,
-          banco: 'bradesco',
-          data: dataISO,
-          descricao: desc,
-          categoria: categorizar(desc),
-          tipo: 'Compra',
-          valor: -val,
-          titular: 'Cartao ' + holder,
-        })
-      }
+      i = j
+      continue
     }
+    i++
   }
 
   return results
