@@ -22,7 +22,7 @@ export function parseBradesco(binary) {
   for (let i = 0; i < strings.length; i++) {
     const s = strings[i].trim()
 
-    const hm = s.match(/([A-Z\s]+) - (\d{4})$/)
+    const hm = s.match(/([A-Z\s]+STAVOLA[A-Z\s]*) - (\d{4})$/)
     if (hm) {
       holder = hm[2]
       continue
