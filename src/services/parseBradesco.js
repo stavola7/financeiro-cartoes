@@ -12,14 +12,14 @@ export function parseBradesco(binary) {
 
   const dateReg = /^\d{2}\/\d{2}$/
   const valReg  = /^-?\d{1,4},\d{2}$/
-  const SKIP = new Set(['Data','Hist','rico','Valor (US$)','Valor(R$)','SALDO ANTERIOR','PAGTO. POR DEB EM C/C'])
-  const STOP = ['Total para ALEXANDRE', 'Total da fatura']
-  const IGNORE_DESC = ['Total para', 'Resumo', 'Saldo', 'Pagamento', 'Despesas', 'Cotacao', 'Taxa']
+  const SKIP    = new Set(['Data','Hist','rico','Valor (US$)','Valor(R$)','SALDO ANTERIOR','PAGTO. POR DEB EM C/C'])
+  const STOP    = ['Total para ALEXANDRE', 'Total da fatura']
+  const IGNORE  = ['Total para','Resumo','Cotacao','Taxa','Saldo Anterior']
 
-  const ano = new Date().getFullYear()
+  const ano     = new Date().getFullYear()
   const results = []
 
-  // Encontra seções de cada titular
+  // Encontra seções de cada titular até linha de total
   const sections = []
   let curSection = null
   for (let i = 0; i < strings.length; i++) {
@@ -36,35 +36,49 @@ export function parseBradesco(binary) {
   }
 
   for (const section of sections) {
-    const items = strings.slice(section.start, section.end)
-    let i = 0
+    const raw = strings.slice(section.start, section.end)
 
-    while (i < items.length) {
-      const s = items[i]
+    // Divide em blocos por data DD/MM
+    const blocks = []
+    let block = null
+    for (const s of raw) {
+      if (dateReg.test(s)) {
+        block = { date: s, items: [] }
+        blocks.push(block)
+      } else if (block) {
+        block.items.push(s)
+      }
+    }
 
-      // Só processa se for uma data válida DD/MM
-      if (!dateReg.test(s)) { i++; continue }
+    // Itens antes da primeira data (ex: BUS SERVICOS no 0549) vão pro primeiro bloco
+    const preItems = []
+    for (const s of raw) {
+      if (dateReg.test(s)) break
+      preItems.push(s)
+    }
+    if (preItems.length > 0 && blocks.length > 0) {
+      blocks[0].items = [...preItems, ...blocks[0].items]
+    }
 
-      const [d, m] = s.split('/')
+    for (const blk of blocks) {
+      const [d, m] = blk.date.split('/')
       const dataISO = `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
 
-      let desc = null
-      let j = i + 1
+      // Filtra itens inválidos
+      const items = blk.items.filter(s =>
+        !SKIP.has(s) && !IGNORE.some(w => s.startsWith(w))
+      )
 
-      while (j < items.length) {
-        const n = items[j]
+      // Lógica: acumula descrições numa pilha
+      // Quando encontra um valor, pega a ÚLTIMA descrição da pilha
+      // Valor sem descrição = IOF/taxa = ignora
+      const pendingDescs = []
 
-        // Para na próxima data
-        if (dateReg.test(n)) break
-        // Para em linha de total/resumo
-        if (STOP.some(sw => n.startsWith(sw))) { i = items.length; break }
-
-        if (SKIP.has(n)) { j++; continue }
-
-        if (valReg.test(n)) {
-          // Só registra se tem descrição antes
-          if (desc !== null) {
-            const val = parseFloat(n.replace(',', '.'))
+      for (const s of items) {
+        if (valReg.test(s)) {
+          if (pendingDescs.length > 0) {
+            const desc = pendingDescs.pop()
+            const val  = parseFloat(s.replace(',', '.'))
             const isEstorno = val < 0
             results.push({
               id: `brad_${results.length}`,
@@ -76,21 +90,13 @@ export function parseBradesco(binary) {
               valor: isEstorno ? Math.abs(val) : -val,
               titular: `Cartao ${section.holder}`,
             })
-            desc = null
           }
-          // Valor sem descrição = IOF/taxa = ignora
-        } else if (
-          n.length > 3 &&
-          !/^\d+$/.test(n) &&
-          !IGNORE_DESC.some(w => n.startsWith(w))
-        ) {
-          desc = n
+          // sem desc = ignora
+        } else if (s.length > 3 && !/^\d+$/.test(s)) {
+          pendingDescs.push(s)
         }
-
-        j++
       }
-
-      i = j
+      // descs sem valor = sem preço disponível = ignora
     }
   }
 
