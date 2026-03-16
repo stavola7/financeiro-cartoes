@@ -1,83 +1,50 @@
 import { categorizar } from '../utils/categorizar'
 
-export function parseBradesco(binary) {
-  const strings = []
-  let cur = ''
-  for (let i = 0; i < binary.length; i++) {
-    const c = binary.charCodeAt(i)
-    if (c >= 32 && c <= 126) cur += binary[i]
-    else { if (cur.length > 3) strings.push(cur.trim()); cur = '' }
-  }
-  if (cur.length > 3) strings.push(cur.trim())
-
-  const dateReg = /^\d{2}\/\d{2}$/
-  const valReg  = /^-?\d{1,4},\d{2}$/
-  const SKIP    = new Set(['Data','Hist','rico','Valor (US$)','Valor(R$)','SALDO ANTERIOR','PAGTO. POR DEB EM C/C'])
-
-  const ano     = new Date().getFullYear()
+export function parseBradesco(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0)
   const results = []
+  const ano = new Date().getFullYear()
 
-  // Encontra onde os dados começam (primeira data DD/MM)
-  const startIdx = strings.findIndex(s => dateReg.test(s))
-  if (startIdx === -1) return results
+  // Detecta separador: ; ou ,
+  const sep = lines[0].includes(';') ? ';' : ','
 
-  // Divide em blocos por data, para em [Content_Types]
-  const blocks = []
-  let block = null
-  for (let i = startIdx; i < strings.length; i++) {
-    const s = strings[i]
-    if (s.startsWith('[Content') || s.startsWith('theme/') || s.startsWith('_rels')) break
-    if (dateReg.test(s)) {
-      block = { date: s, items: [] }
-      blocks.push(block)
-    } else if (block) {
-      block.items.push(s)
-    }
-  }
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(sep).map(c => c.trim().replace(/"/g, ''))
+    if (cols.length < 3) continue
 
-  // Itens antes da primeira data vão pro primeiro bloco
-  const preItems = []
-  for (let i = startIdx - 1; i >= 0; i--) {
-    const s = strings[i]
-    if (/^(Data|Hist|rico|Valor|Sheet|#,##|_-)/.test(s)) break
-    if (s.length > 3) preItems.unshift(s)
-  }
-  if (preItems.length > 0 && blocks.length > 0) {
-    blocks[0].items = [...preItems, ...blocks[0].items]
-  }
+    const [dataRaw, descricao, valorRaw] = cols
 
-  for (const blk of blocks) {
-    const [d, m] = blk.date.split('/')
-    const dataISO = `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
+    // Valida data DD/MM ou DD/MM/YYYY
+    if (!dataRaw.match(/^\d{2}\/\d{2}/)) continue
+    if (!descricao || descricao.length < 2) continue
 
-    const items = blk.items.filter(s => !SKIP.has(s))
+    // Ignora linhas de resumo/total
+    const ignora = ['SALDO ANTERIOR', 'PAGTO. POR DEB EM C/C', 'Total', 'Resumo']
+    if (ignora.some(w => descricao.startsWith(w))) continue
 
-    // Percorre em sequência: desc → val = uma transação
-    // val sem desc anterior = IOF/taxa = ignora
-    // desc sem val = sobrescreve (pega a mais recente)
-    let pendingDesc = null
-    for (const s of items) {
-      if (valReg.test(s)) {
-        if (pendingDesc !== null) {
-          const val = parseFloat(s.replace(',', '.'))
-          const isEstorno = val < 0
-          results.push({
-            id: `brad_${results.length}`,
-            banco: 'bradesco',
-            data: dataISO,
-            descricao: pendingDesc,
-            categoria: categorizar(pendingDesc),
-            tipo: isEstorno ? 'Estorno' : 'Compra',
-            valor: isEstorno ? Math.abs(val) : -val,
-            titular: '',
-          })
-          pendingDesc = null
-        }
-        // val sem desc = ignora
-      } else if (s.length > 3 && !/^\d+$/.test(s)) {
-        pendingDesc = s
-      }
-    }
+    // Parseia valor
+    const valorLimpo = valorRaw.replace(/\./g, '').replace(',', '.')
+    const valor = parseFloat(valorLimpo)
+    if (isNaN(valor) || valor === 0) continue
+
+    // Parseia data
+    const partes = dataRaw.split('/')
+    const d = partes[0].padStart(2, '0')
+    const m = partes[1].padStart(2, '0')
+    const a = partes[2] ? partes[2] : String(ano)
+    const dataISO = `${a}-${m}-${d}`
+
+    const isEstorno = valor < 0
+    results.push({
+      id: `brad_${i}`,
+      banco: 'bradesco',
+      data: dataISO,
+      descricao,
+      categoria: categorizar(descricao),
+      tipo: isEstorno ? 'Estorno' : 'Compra',
+      valor: isEstorno ? Math.abs(valor) : -valor,
+      titular: '',
+    })
   }
 
   return results

@@ -31,8 +31,12 @@ export default function ImportModal({ onImportado }) {
         alert('Erro ao processar arquivo: ' + err.message)
       }
     }
-    if (banco === 'bradesco') reader.readAsBinaryString(arquivo)
-    else reader.readAsText(arquivo, 'UTF-8')
+    if (banco === 'bradesco' && arquivo.name.endsWith('.xls')) {
+        reader.readAsBinaryString(arquivo)
+}   else {
+        reader.readAsText(arquivo, 'latin-1')
+}
+    
   }
 
   return (
