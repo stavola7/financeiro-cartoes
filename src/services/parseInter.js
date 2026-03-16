@@ -21,7 +21,7 @@ export function parseInter(text) {
       .replace(/\./g, '')
       .replace(',', '.')
     const valor = parseFloat(valorLimpo)
-    if (isNaN(valor) || valor === 0) continue
+    if (isNaN(valor)) continue
 
     // Parseia data DD/MM/YYYY → YYYY-MM-DD
     const [d, m, a] = dataRaw.split('/')
