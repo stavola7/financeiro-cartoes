@@ -13,22 +13,20 @@ export function parseBradesco(binary) {
   const dateReg = /^\d{2}\/\d{2}$/
   const valReg  = /^-?\d{1,4},\d{2}$/
   const SKIP    = new Set(['Data','Hist','rico','Valor (US$)','Valor(R$)','SALDO ANTERIOR','PAGTO. POR DEB EM C/C'])
-  const IGNORE_DESC = ['Total','Resumo','Cotacao','Taxa','Saldo','Sheet','Content','theme','rels']
 
-  const ano = new Date().getFullYear()
+  const ano     = new Date().getFullYear()
   const results = []
 
   // Encontra onde os dados começam (primeira data DD/MM)
   const startIdx = strings.findIndex(s => dateReg.test(s))
   if (startIdx === -1) return results
 
-  // Divide em blocos por data DD/MM
+  // Divide em blocos por data, para em [Content_Types]
   const blocks = []
   let block = null
   for (let i = startIdx; i < strings.length; i++) {
     const s = strings[i]
-    // Para quando sair do range de dados reais
-    if (/^\[Content_Types\]/.test(s) || /^theme\//.test(s) || /^_rels/.test(s)) break
+    if (s.startsWith('[Content') || s.startsWith('theme/') || s.startsWith('_rels')) break
     if (dateReg.test(s)) {
       block = { date: s, items: [] }
       blocks.push(block)
@@ -37,12 +35,12 @@ export function parseBradesco(binary) {
     }
   }
 
-  // Itens antes da primeira data (ex: BUS SERVICOS no 0549)
+  // Itens antes da primeira data vão pro primeiro bloco
   const preItems = []
   for (let i = startIdx - 1; i >= 0; i--) {
     const s = strings[i]
-    if (/^(Data|Hist|rico|Valor|Sheet|#,##)/.test(s)) break
-    preItems.unshift(s)
+    if (/^(Data|Hist|rico|Valor|Sheet|#,##|_-)/.test(s)) break
+    if (s.length > 3) preItems.unshift(s)
   }
   if (preItems.length > 0 && blocks.length > 0) {
     blocks[0].items = [...preItems, ...blocks[0].items]
@@ -52,35 +50,32 @@ export function parseBradesco(binary) {
     const [d, m] = blk.date.split('/')
     const dataISO = `${ano}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
 
-    const items = blk.items.filter(s =>
-      !SKIP.has(s) &&
-      !IGNORE_DESC.some(w => s.startsWith(w)) &&
-      !/^[#_\[{]/.test(s)
-    )
+    const items = blk.items.filter(s => !SKIP.has(s))
 
-    // Pilha de descrições: valor pega a última descrição pendente
-    const pendingDescs = []
-
+    // Percorre em sequência: desc → val = uma transação
+    // val sem desc anterior = IOF/taxa = ignora
+    // desc sem val = sobrescreve (pega a mais recente)
+    let pendingDesc = null
     for (const s of items) {
       if (valReg.test(s)) {
-        if (pendingDescs.length > 0) {
-          const desc = pendingDescs.pop()
-          const val  = parseFloat(s.replace(',', '.'))
+        if (pendingDesc !== null) {
+          const val = parseFloat(s.replace(',', '.'))
           const isEstorno = val < 0
           results.push({
             id: `brad_${results.length}`,
             banco: 'bradesco',
             data: dataISO,
-            descricao: desc,
-            categoria: categorizar(desc),
+            descricao: pendingDesc,
+            categoria: categorizar(pendingDesc),
             tipo: isEstorno ? 'Estorno' : 'Compra',
             valor: isEstorno ? Math.abs(val) : -val,
             titular: '',
           })
+          pendingDesc = null
         }
-        // valor sem desc = IOF/taxa = ignora
+        // val sem desc = ignora
       } else if (s.length > 3 && !/^\d+$/.test(s)) {
-        pendingDescs.push(s)
+        pendingDesc = s
       }
     }
   }
