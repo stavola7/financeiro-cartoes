@@ -1,36 +1,45 @@
 import { categorizar } from '../utils/categorizar'
 
 export function parseInter(text) {
-  const linhas = text.split('\n')
-  const resultado = []
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+  const results = []
 
-  for (let i = 1; i < linhas.length; i++) {
-    const linha = linhas[i].trim()
-    if (!linha) continue
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',').map(c => c.trim().replace(/"/g, ''))
+    if (cols.length < 5) continue
 
-    const colunas = linha.split(',').map(c => c.replace(/"/g, '').trim())
-    if (colunas.length < 5) continue
+    const [dataRaw, descricao, , tipo, valorRaw] = cols
+    if (!dataRaw || !descricao) continue
 
-    const [data, descricao, , tipo, valorRaw] = colunas
-    if (!data || !descricao) continue
+    // Valida data DD/MM/YYYY
+    if (!dataRaw.match(/^\d{2}\/\d{2}\/\d{4}$/)) continue
 
-    const neg = valorRaw.includes('-')
-    const valorLimpo = valorRaw.replace(/[R$\s\-]/g, '').replace('.', '').replace(',', '.')
-    const valor = parseFloat(valorLimpo) || 0
+    // Parseia valor — remove R$, espaços, pontos de milhar
+    const isNegativo = valorRaw.includes('-')
+    const valorLimpo = valorRaw
+      .replace(/[R$\s\-]/g, '')
+      .replace(/\./g, '')
+      .replace(',', '.')
+    const valor = parseFloat(valorLimpo)
+    if (isNaN(valor) || valor === 0) continue
 
-    const [d, m, y] = data.split('/')
-    const dataISO = y ? `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}` : data
+    // Parseia data DD/MM/YYYY → YYYY-MM-DD
+    const [d, m, a] = dataRaw.split('/')
+    const dataISO = `${a}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`
 
-    resultado.push({
-      id: 'inter_' + i,
+    // Se tem - é estorno/pagamento = valor positivo no app
+    // Se não tem - é compra = valor negativo no app
+    const isEstorno = isNegativo
+    results.push({
+      id: `inter_${i}`,
       banco: 'inter',
       data: dataISO,
       descricao,
       categoria: categorizar(descricao),
       tipo: tipo || '',
-      valor: neg ? -valor : valor,
+      valor: isEstorno ? valor : -valor,
     })
   }
 
-  return resultado.filter(t => t.descricao && t.valor !== 0)
+  return results
 }
