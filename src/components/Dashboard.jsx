@@ -13,24 +13,23 @@ export default function Dashboard({ faturas, onAtualizar }) {
 
   let txs = faturas.filter(f => f.data_transacao?.startsWith(mesSel))
   if (bancoFiltro !== 'all') txs = txs.filter(f => f.banco === bancoFiltro)
-  const gastos = txs.filter(t => t.valor < 0)
-  const total = gastos.reduce((s, t) => s + Math.abs(t.valor), 0)
-  const totalInter = gastos.filter(t => t.banco === 'inter').reduce((s, t) => s + Math.abs(t.valor), 0)
-  const totalBrad = gastos.filter(t => t.banco === 'bradesco').reduce((s, t) => s + Math.abs(t.valor), 0)
+  const total = Math.abs(txs.reduce((s, t) => s + t.valor, 0))
+  const totalInter = Math.abs(txs.filter(t => t.banco === 'inter').reduce((s, t) => s + t.valor, 0))
+  const totalBrad = Math.abs(txs.filter(t => t.banco === 'bradesco').reduce((s, t) => s + t.valor, 0))
 
   const porCategoria = {}
-  gastos.forEach(t => { porCategoria[t.categoria] = (porCategoria[t.categoria] || 0) + Math.abs(t.valor) })
+  txs.forEach(t => { porCategoria[t.categoria] = (porCategoria[t.categoria] || 0) + Math.abs(t.valor) })
   const catEntries = Object.entries(porCategoria).sort((a, b) => b[1] - a[1])
 
   const pieData = catEntries.map(([name, value]) => ({ name, value }))
 
   const lineData = [...meses].reverse().map(m => ({
     mes: new Date(m + '-01').toLocaleDateString('pt-BR', { month: 'short' }),
-    Inter: faturas.filter(f => f.data_transacao?.startsWith(m) && f.banco === 'inter' && f.valor < 0).reduce((s, t) => s + Math.abs(t.valor), 0),
-    Bradesco: faturas.filter(f => f.data_transacao?.startsWith(m) && f.banco === 'bradesco' && f.valor < 0).reduce((s, t) => s + Math.abs(t.valor), 0),
+    Inter: Math.abs(faturas.filter(f => f.data_transacao?.startsWith(m) && f.banco === 'inter').reduce((s, t) => s + t.valor, 0)),
+    Bradesco: Math.abs(faturas.filter(f => f.data_transacao?.startsWith(m) && f.banco === 'bradesco').reduce((s, t) => s + t.valor, 0)),
   }))
 
-  const top10 = [...gastos].sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor)).slice(0, 10)
+  const top10 = [...txs].sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor)).slice(0, 10)
 
   const card = (label, value, cor) => (
     <div style={{ background: '#1a1d27', border: '1px solid #2e3350', borderRadius: '12px', padding: '18px 20px' }}>
@@ -63,7 +62,7 @@ export default function Dashboard({ faturas, onAtualizar }) {
         {card('Total do mês', formatBRL(total), '#9d97ff')}
         {card('Inter', formatBRL(totalInter), '#ff6b35')}
         {card('Bradesco', formatBRL(totalBrad), '#ff4d5e')}
-        {card('Transações', gastos.length, '#00c896')}
+        {card('Transações', txs.length, '#00c896')}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
