@@ -51,14 +51,23 @@ export default function Importar() {
       parcela: t.tipo || '',
     }))
 
-    const { error } = await supabase.from('faturas').insert(registros)
-    setSalvando(false)
+    try {
+      const { error } = await supabase.from('faturas').insert(registros)
+      setSalvando(false)
 
-    if (error) {
-      alert('Erro ao salvar: ' + error.message)
-    } else {
-      alert(`${registros.length} transações salvas com sucesso!`)
-      navigate('/')
+      if (error) {
+        alert('Erro ao salvar: ' + error.message)
+      } else {
+        alert(`${registros.length} transações salvas com sucesso!`)
+        navigate('/')
+      }
+    } catch (err) {
+      setSalvando(false)
+      if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+        alert('Erro de conexão: o banco de dados Supabase pode estar pausado ou fora do ar.\n\nAcesse supabase.com/dashboard e verifique se o projeto está ativo.')
+      } else {
+        alert('Erro ao salvar: ' + err.message)
+      }
     }
   }
 
