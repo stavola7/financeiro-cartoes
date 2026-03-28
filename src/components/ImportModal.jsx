@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import * as XLSX from 'xlsx'
 import { parseInter } from '../services/parseInter'
 import { parseBradesco } from '../services/parseBradesco'
 
@@ -21,9 +22,15 @@ export default function ImportModal({ onImportado }) {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
+        let text = e.target.result
+        if (banco === 'bradesco' && (arquivo.name.endsWith('.xls') || arquivo.name.endsWith('.xlsx'))) {
+          const wb = XLSX.read(text, { type: 'binary' })
+          const ws = wb.Sheets[wb.SheetNames[0]]
+          text = XLSX.utils.sheet_to_csv(ws, { FS: ';' })
+        }
         const txs = banco === 'inter'
-          ? parseInter(e.target.result)
-          : parseBradesco(e.target.result)
+          ? parseInter(text)
+          : parseBradesco(text)
         if (txs.length === 0) { alert('Nenhuma transação encontrada'); return }
         setModalAberto(false)
         onImportado(txs)
@@ -31,11 +38,11 @@ export default function ImportModal({ onImportado }) {
         alert('Erro ao processar arquivo: ' + err.message)
       }
     }
-    if (banco === 'bradesco' && arquivo.name.endsWith('.xls')) {
+    if (banco === 'bradesco' && (arquivo.name.endsWith('.xls') || arquivo.name.endsWith('.xlsx'))) {
         reader.readAsBinaryString(arquivo)
-}   else {
+    } else {
         reader.readAsText(arquivo, 'latin-1')
-}
+    }
     
   }
 
