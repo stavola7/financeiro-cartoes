@@ -1,5 +1,6 @@
 const REGRAS = {
-  'Alimentacao': ['ifood','ifd','restaurante','pizza','mercado','padaria','lanche','grão','grao','sabor','terepizza','marmita','sushi','cafe'],
+  'Alimentacao': ['ifood','ifd','restaurante','pizza','mercado','padaria','lanche','grão','grao','sabor',
+  'terepizza','marmita','sushi','cafe','conde','gran','gourmet','conde gourmet','gran coffee','coffee', 'santa ceia', 'ceia','salamix'],
   'Transporte': ['uber','99','posto','combustivel','lalamove','clickbus','clic','onibus'],
   'Saude': ['farmacia','drogaria','clinica','hospital','odonto','unimed','amil'],
   'Lazer': ['cinema','netflix','spotify','disney','prime','hbo','steam','kabum','ingresso','bar'],
@@ -30,6 +31,7 @@ export const CATEGORIAS = [
   { nome: 'Pagamento', cor: '#6B7280', icone: '💳' },
   { nome: 'Moradia', cor: '#6366F1', icone: '🏠' },
   { nome: 'Educacao', cor: '#F59E0B', icone: '📚' },
+  { nome: 'Mari', cor: '#E879F9', icone: '💁‍♀️' },
   { nome: 'Outros', cor: '#9CA3AF', icone: '📦' },
 ]
 
