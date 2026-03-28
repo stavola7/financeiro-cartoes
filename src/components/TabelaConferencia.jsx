@@ -1,7 +1,7 @@
 import { CATEGORIAS } from '../utils/categorizar'
 
 export default function TabelaConferencia({ transacoes, onAtualizar, onConfirmar, onVoltar, salvando }) {
-  const total = transacoes.filter(t => t.valor < 0).reduce((s, t) => s + Math.abs(t.valor), 0)
+  const total = transacoes.reduce((s, t) => s + t.valor, 0)
 
   function atualizar(id, campo, valor) {
     onAtualizar(transacoes.map(t => t.id === id ? { ...t, [campo]: valor } : t))
@@ -32,7 +32,7 @@ export default function TabelaConferencia({ transacoes, onAtualizar, onConfirmar
       <div style={{ background: '#1a1d27', border: '1px solid #2e3350', borderRadius: '12px', padding: '16px 20px', marginBottom: '20px', display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: '11px', color: '#555a7a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total de gastos</div>
-          <div style={{ fontSize: '22px', fontWeight: '700', color: '#ff4d5e' }}>{formatBRL(total)}</div>
+          <div style={{ fontSize: '22px', fontWeight: '700', color: '#ff4d5e' }}>{formatBRL(Math.abs(total))}</div>
         </div>
         <div>
           <div style={{ fontSize: '11px', color: '#555a7a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Transações</div>
